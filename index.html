@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Vivat Slovakia mapa</title>
+    <link rel="icon" href="images/favicon/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: white;
+            padding: 10px;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .leaflet-top.leaflet-right {
+            top: 10px;
+            right: 10px;
+        }
+
+        .icon-selector {
+            margin-top: 10px;
+        }
+
+        .icon-selector img {
+            width: 24px;
+            height: 24px;
+            margin: 2px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .icon-selector img.selected {
+            border: 1px solid blue;
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="controls">
+        <button onclick="exportMarkers()">Export Markers to JSON</button>
+        <input type="file" id="fileInput" accept=".json" onchange="loadMarkers(event)" />
+        <button onclick="enableDeleteMode()">Delete Mode</button>
+        <div class="icon-selector" id="iconSelector"></div>
+    </div>
+
+    <script>
+        const iconList = [
+            'mapicon-anchor.png', 'mapicon-bumper-car.png', 'mapicon-car.png', 'mapicon-car-shop.png',
+            'mapicon-fish.png', 'mapicon-garage.png', 'mapicon-hand.png', 'mapicon-home.png',
+            'mapicon-horse.png', 'mapicon-mission.png', 'mapicon-municak.png', 'mapicon-objective.png',
+            'mapicon-package.png', 'mapicon-phone.png', 'mapicon-skull.png', 'mapicon-train.png',
+            'mapicon-ufo.png', 'mapicon-wrench.png'
+        ];
+
+        const iconBasePath = 'images/mapicons/';
+        let selectedIcon = null; 
+        let deleteMode = false; 
+        let markersData = [];
+
+        function createIconSelector() {
+            const iconSelector = document.getElementById('iconSelector');
+            iconList.forEach(icon => {
+                const img = document.createElement('img');
+                img.src = iconBasePath + icon;
+                img.alt = icon;
+                img.onclick = () => selectIcon(img, icon);
+                iconSelector.appendChild(img);
+            });
+        }
+
+        function selectIcon(imgElement, icon) {
+            const icons = document.querySelectorAll('.icon-selector img');
+            icons.forEach(icon => icon.classList.remove('selected'));
+            imgElement.classList.add('selected');
+            selectedIcon = iconBasePath + icon;
+        }
+
+        var map = L.map('map', {
+            crs: L.CRS.Simple,
+            zoomControl: false
+        }).setView([500, 500], 1);
+
+        var imageBounds = [[0, 0], [1000, 1000]];
+        var imageBounds2 = [[0, 0], [1000, 1000]];
+
+        var layer1 = L.imageOverlay('maps/mini_map.png', imageBounds).addTo(map);
+        var layer2 = L.imageOverlay('maps/BA_Automap_clear.png', imageBounds2);
+
+        var baseLayers = {
+            "Mapa": layer1,
+            "Auto Map": layer2
+        };
+
+        L.control.layers(baseLayers).addTo(map);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        // Automatické načítanie markers.json zo servera pri načítaní stránky
+        window.onload = function() {
+            fetch('markers.json')
+                .then(response => response.json())
+                .then(data => {
+                    markersData = data;
+                    markersData.forEach(function(markerData) {
+                        var customIcon = L.icon({
+                            iconUrl: markerData.icon,
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 32]
+                        });
+                        var marker = L.marker([markerData.lat, markerData.lng], { icon: customIcon }).addTo(map);
+
+                        marker.on('click', function() {
+                            if (deleteMode) {
+                                map.removeLayer(marker);
+                                markersData = markersData.filter(m => m.lat !== markerData.lat || m.lng !== markerData.lng);
+                            }
+                        });
+                    });
+                })
+                .catch(error => console.error('Error loading markers:', error));
+        };
+
+        map.on('click', function(e) {
+            if (deleteMode) {
+                return;
+            }
+
+            if (selectedIcon) {
+                var customIcon = L.icon({
+                    iconUrl: selectedIcon,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 32]
+                });
+
+                var marker = L.marker(e.latlng, { icon: customIcon }).addTo(map);
+                markersData.push({ lat: e.latlng.lat, lng: e.latlng.lng, icon: selectedIcon });
+
+                marker.on('click', function() {
+                    if (deleteMode) {
+                        map.removeLayer(marker);
+                        markersData = markersData.filter(m => m.lat !== e.latlng.lat || m.lng !== e.latlng.lng);
+                    }
+                });
+            } else {
+                alert('Vyberte ikonu pred pridaním značky.');
+            }
+        });
+
+        function exportMarkers() {
+            var json = JSON.stringify(markersData);
+            var blob = new Blob([json], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'markers.json';
+            a.click();
+        }
+
+        function loadMarkers(event) {
+            var file = event.target.files[0];
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var json = JSON.parse(e.target.result);
+                json.forEach(function(markerData) {
+                    var customIcon = L.icon({
+                        iconUrl: markerData.icon,
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 32]
+                    });
+                    var marker = L.marker([markerData.lat, markerData.lng], { icon: customIcon }).addTo(map);
+
+                    marker.on('click', function() {
+                        if (deleteMode) {
+                            map.removeLayer(marker);
+                            markersData = markersData.filter(m => m.lat !== markerData.lat || m.lng !== markerData.lng);
+                        }
+                    });
+                });
+            };
+            reader.readAsText(file);
+        }
+
+        function enableDeleteMode() {
+            deleteMode = !deleteMode;
+            alert(deleteMode ? 'Režim mazania aktivovaný. Kliknite na značku, ktorú chcete odstrániť.' : 'Režim mazania deaktivovaný.');
+        }
+
+        createIconSelector();
+    </script>
+</body>
+</html>
